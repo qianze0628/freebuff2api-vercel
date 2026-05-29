@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .codebuff import CodebuffAccountPool, CodebuffClient, CodebuffError
 from .config import Settings, project_env_path, write_env_values
@@ -46,20 +46,25 @@ def _cookie_value(secret: str) -> str:
 
 
 def _check_admin_auth(request: Request) -> None:
+    if _is_admin_authenticated(request):
+        return
+    raise HTTPException(status_code=401, detail="Admin login required")
+
+
+def _is_admin_authenticated(request: Request) -> bool:
     settings = _settings(request)
     secret = _admin_secret(settings)
     if not secret:
-        raise HTTPException(status_code=503, detail="FREEBUFF_ADMIN_KEY is not configured")
+        return False
     raw = request.cookies.get(COOKIE_NAME) or ""
     try:
         issued_at, signature = raw.split(".", 1)
         issued_ts = int(issued_at)
-    except ValueError as error:
-        raise HTTPException(status_code=401, detail="Admin login required") from error
+    except ValueError:
+        return False
     if int(time.time()) - issued_ts > COOKIE_MAX_AGE:
-        raise HTTPException(status_code=401, detail="Admin session expired")
-    if not hmac.compare_digest(signature, _sign(secret, issued_at)):
-        raise HTTPException(status_code=401, detail="Admin login required")
+        return False
+    return hmac.compare_digest(signature, _sign(secret, issued_at))
 
 
 def _is_vercel() -> bool:
@@ -148,6 +153,11 @@ async def _save_token_list(request: Request, tokens: list[str]) -> dict[str, Any
     }
 
 
+@router.get("/", include_in_schema=False)
+async def root_redirect() -> RedirectResponse:
+    return RedirectResponse("/admin", status_code=307)
+
+
 @router.get("/admin", response_class=HTMLResponse)
 @router.get("/admin/", response_class=HTMLResponse)
 async def admin_page() -> HTMLResponse:
@@ -180,6 +190,18 @@ async def logout() -> JSONResponse:
     response = JSONResponse(_api_ok())
     response.delete_cookie(COOKIE_NAME)
     return response
+
+
+@router.get("/admin/api/session")
+async def session_status(request: Request) -> dict[str, Any]:
+    settings = _settings(request)
+    return _api_ok(
+        {
+            "authenticated": _is_admin_authenticated(request),
+            "admin_key_configured": bool(settings.admin_key),
+            "api_key_configured": bool(settings.local_api_key),
+        }
+    )
 
 
 @router.get("/admin/api/overview")

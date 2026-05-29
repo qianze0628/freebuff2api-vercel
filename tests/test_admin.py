@@ -14,6 +14,25 @@ class AdminTests(unittest.TestCase):
         self.assertIn("freebuff2api 管理面板", response.text)
         self.assertIn("naive-ui", response.text)
 
+    def test_root_redirects_to_admin(self) -> None:
+        response = TestClient(app).get("/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/admin")
+
+    def test_session_status_reports_login_state(self) -> None:
+        with patch.dict("os.environ", {"FREEBUFF_ADMIN_KEY": "admin-secret"}, clear=True):
+            with TestClient(app) as client:
+                anonymous = client.get("/admin/api/session")
+                client.post("/admin/api/login", json={"key": "admin-secret"})
+                authenticated = client.get("/admin/api/session")
+
+        self.assertEqual(anonymous.status_code, 200)
+        self.assertFalse(anonymous.json()["data"]["authenticated"])
+        self.assertTrue(anonymous.json()["data"]["admin_key_configured"])
+        self.assertEqual(authenticated.status_code, 200)
+        self.assertTrue(authenticated.json()["data"]["authenticated"])
+
     def test_admin_api_requires_login(self) -> None:
         with patch.dict("os.environ", {"FREEBUFF_ADMIN_KEY": "admin-secret"}, clear=True):
             with TestClient(app) as client:

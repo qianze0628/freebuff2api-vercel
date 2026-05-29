@@ -258,7 +258,24 @@
 <body>
   <div id="app" v-cloak>
     <n-config-provider>
-        <div v-if="!authed" class="login-shell">
+        <div v-if="checkingSession" class="login-shell">
+          <section class="login-brief">
+            <div><div class="brand-mark">FB</div></div>
+            <div>
+              <h1 class="login-title">正在检查登录状态</h1>
+              <p class="login-subtitle">如果已有管理会话，会直接进入控制台；否则会显示登录页。</p>
+            </div>
+            <p class="muted mono">/admin</p>
+          </section>
+          <section class="login-card">
+            <div class="login-panel">
+              <n-card title="Session" :bordered="false">
+                <n-skeleton text :repeat="4" />
+              </n-card>
+            </div>
+          </section>
+        </div>
+        <div v-else-if="!authed" class="login-shell">
           <section class="login-brief">
             <div>
               <div class="brand-mark">FB</div>
@@ -519,6 +536,7 @@
     createApp({
       setup() {
         const { message } = naive.createDiscreteApi(['message']);
+        const checkingSession = ref(true);
         const authed = ref(false);
         const loginKey = ref('');
         const initialTab = (location.hash || '').replace(/^#\/?/, '') || 'overview';
@@ -637,6 +655,19 @@
             if (String(error.message || '').includes('401')) authed.value = false;
           } finally {
             loading.page = false;
+          }
+        }
+
+        async function checkSession() {
+          checkingSession.value = true;
+          try {
+            const res = await api('/admin/api/session');
+            authed.value = Boolean(res.data && res.data.authenticated);
+            if (authed.value) await refreshAll();
+          } catch {
+            authed.value = false;
+          } finally {
+            checkingSession.value = false;
           }
         }
 
@@ -806,17 +837,10 @@
           message.success('Env 内容已复制');
         }
 
-        onMounted(async () => {
-          try {
-            await refreshAll();
-            authed.value = true;
-          } catch {
-            authed.value = false;
-          }
-        });
+        onMounted(checkSession);
 
         return {
-          authed, loginKey, tab, nav, overview, config, logs, logLevel, logLimit,
+          checkingSession, authed, loginKey, tab, nav, overview, config, logs, logLevel, logLimit,
           logLevels, lastEnv, envInfo, modelOptions, testForm, testResult, tokenHelpUrl, tokenModal,
           apiKeyForm, security, loading, activeTitle, activeSubtitle,
           login, logout, refreshAll, loadLogs, loadModels, loadEnv, openTokenModal,
