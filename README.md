@@ -127,12 +127,41 @@ Vercel 页面推荐填写：
 
 ### 环境变量
 
-在 Vercel 项目页面进入 `Settings` -> `Environment Variables`，至少填写：
+Vercel 不会读取你本地的 `.env` 文件，线上变量需要在 Vercel 后台单独配置。
+
+填写流程：
+
+1. 打开 Vercel 项目页面。
+2. 进入 `Settings` -> `Environment Variables`。
+3. 在 `Key` 填变量名，例如 `FREEBUFF_TOKEN`。
+4. 在 `Value` 填变量值，例如你的 Freebuff token。
+5. `Environment` 建议至少勾选 `Production`；需要预览部署也能使用时，再勾选 `Preview`。
+6. 点击 `Save` 或 `Add` 保存。
+7. 重复添加其它变量。
+8. 添加或修改完成后，进入 `Deployments`，点击最新部署的 `Redeploy`。
+
+至少填写：
 
 ```dotenv
 FREEBUFF_TOKEN=你的 Freebuff Bearer token
 FREEBUFF_API_KEY=你自己设置的访问密钥
 ```
+
+变量含义：
+
+| 变量名 | 是否必填 | 说明 |
+| --- | --- | --- |
+| `FREEBUFF_TOKEN` | 是 | Freebuff / Codebuff 的上游 token，支持多个 token 用英文逗号分隔。 |
+| `FREEBUFF_API_KEY` | 强烈建议 | 你自己给当前 API 服务设置的访问密钥；客户端请求时使用 `Authorization: Bearer <FREEBUFF_API_KEY>`。 |
+| `FREEBUFF_API_BASE_URL` | 否 | Codebuff 上游地址，默认 `https://www.codebuff.com`。 |
+| `FREEBUFF_AD_PROVIDERS` | 否 | 广告链提供方，默认 `gravity,zeroclick`。 |
+| `FREEBUFF_TIMEOUT` | 否 | 上游请求超时时间，默认 `60` 秒。 |
+| `FREEBUFF_PROXY_ENABLED` | 否 | 是否启用代理；Vercel 上通常填 `false`。 |
+| `FREEBUFF_DEBUG` | 否 | 是否开启调试日志；排查问题时可临时改为 `true`。 |
+| `FREEBUFF_LOG_LEVEL` | 否 | 日志等级，默认 `INFO`。 |
+| `FREEBUFF_TIMEZONE` | 否 | 上游请求使用的时区标识，默认 `Asia/Shanghai`。 |
+| `FREEBUFF_LOCALE` | 否 | 上游请求使用的语言区域，默认 `zh-CN`。 |
+| `FREEBUFF_OS` | 否 | 上游请求模拟的系统类型，默认 `windows`。 |
 
 推荐同时填写：
 
@@ -159,6 +188,28 @@ FREEBUFF_PROXY_URL=socks5://127.0.0.1:7890
 `127.0.0.1` 在 Vercel 云端代表 Vercel 自己的运行环境，不是你的电脑。
 
 `FREEBUFF_HOST` 和 `FREEBUFF_PORT` 主要用于本地运行，Vercel 部署时不需要填写。
+
+### 部署地区
+
+这个项目当前没有在 `vercel.json` 里强制写死函数地区，而是使用 Vercel 项目的默认部署地区。这样可以避免 Vercel 对 Python Serverless Function 的路径匹配配置报错。
+
+你之前部署日志里显示：
+
+```text
+Running build in Washington, D.C., USA (East) - iad1
+```
+
+这表示当前构建运行在 `iad1`，也就是美国东部 Washington, D.C. 区域。Vercel 的 Serverless Function 默认区域也通常会跟随项目设置或账号默认设置。
+
+查看或调整地区的方法：
+
+1. 打开 Vercel 项目页面。
+2. 进入 `Settings`。
+3. 找到 `Functions` 或 `Function Region` 相关配置。
+4. 选择需要的区域，例如 `Washington, D.C., USA (East) - iad1`。
+5. 保存后重新部署。
+
+一般建议保持 `iad1`。如果你的主要调用方在亚洲，可以在 Vercel 后台查看账号是否支持更近的区域；但上游 Codebuff / Freebuff 的网络连通性比访问者到 Vercel 的距离更关键。
 
 ### 更新 Token 或环境变量
 
