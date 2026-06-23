@@ -530,6 +530,7 @@ class AnthropicStreamState:
 
         # Current state per content block.
         self._text: str = ""
+        self._text_block_index: int = 0  # anthropic index of the text block
         self._current_tool_index: int | None = None  # openai tool index
         self._tool_use_ids: dict[int, str] = {}  # openai idx → tool_use id
         self._tool_names: dict[int, str] = {}  # openai idx → tool name
@@ -602,12 +603,14 @@ class AnthropicStreamState:
                     # First text delta → start text block.
                     self._text_block_started = True
                     self._active_block_type = "text"
+                    self._text_block_index = self._next_anthro_index
+                    self._next_anthro_index += 1
                     events.append(
                         (
                             "content_block_start",
                             {
                                 "type": "content_block_start",
-                                "index": self._next_anthro_index,
+                                "index": self._text_block_index,
                                 "content_block": {"type": "text", "text": ""},
                             },
                         )
@@ -618,7 +621,7 @@ class AnthropicStreamState:
                         "content_block_delta",
                         {
                             "type": "content_block_delta",
-                            "index": self._next_anthro_index,
+                            "index": self._text_block_index,
                             "delta": {"type": "text_delta", "text": content},
                         },
                     )
@@ -647,13 +650,12 @@ class AnthropicStreamState:
                             and self._active_block_type == "text"
                         ):
                             self._text_block_closed = True
-                            text_anthro_idx = 0  # text is always index 0 in our impl
                             events.append(
                                 (
                                     "content_block_stop",
                                     {
                                         "type": "content_block_stop",
-                                        "index": text_anthro_idx,
+                                        "index": self._text_block_index,
                                     },
                                 )
                             )
@@ -731,13 +733,12 @@ class AnthropicStreamState:
         if self._text_block_started and not self._text_block_closed:
             self._text_block_closed = True
             if self._active_block_type == "text":
-                text_anthro_idx = 0  # text is always first block (index 0)
                 events.append(
                     (
                         "content_block_stop",
                         {
                             "type": "content_block_stop",
-                            "index": text_anthro_idx,
+                            "index": self._text_block_index,
                         },
                     )
                 )
