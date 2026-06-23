@@ -182,6 +182,10 @@ def _record_request(
     store.add(record)
 
 
+@app.get("/api/keep-warm")
+async def keep_warm() -> dict[str, Any]:
+    return {"status": "ok", "warm": True}
+
 @app.get("/healthz")
 async def healthz(request: Request) -> dict[str, Any]:
     _check_local_auth(request)
@@ -589,9 +593,10 @@ async def anthropic_messages(request: Request) -> Any:
             detail="max_tokens: field required",
         )
 
-    # Model resolution.
+    # Model resolution — preserve original model name for the response.
+    requested_model = body.get("model")
     try:
-        model_config = resolve_model(body.get("model"))
+        model_config = resolve_model(requested_model)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     model = model_config.id
@@ -666,7 +671,7 @@ async def anthropic_messages(request: Request) -> Any:
 
     if stream:
         return StreamingResponse(
-            _stream_anthropic_events(request, payload, run, api_key=api_key, account_lease=lease),
+            _stream_anthropic_events(request, payload, run, api_key=api_key, account_lease=lease, requested_model=requested_model),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
@@ -681,7 +686,7 @@ async def anthropic_messages(request: Request) -> Any:
             request,
             payload,
             run,
-            model,
+            requested_model,
             client=lease.client,
         )
         duration_ms = int((time.time() - started) * 1000)
@@ -709,11 +714,12 @@ async def _stream_anthropic_events(
     api_key = None,
     account_lease: CodebuffAccountLease | None = None,
     client: CodebuffClient | None = None,
+    requested_model: str | None = None,
 ) -> AsyncIterator[bytes]:
     started = time.time()
     client = client or (account_lease.client if account_lease else _client(request))
     settings = _settings(request)
-    state = AnthropicStreamState(model=payload.get("model", ""))
+    state = AnthropicStreamState(model=requested_model or payload.get("model", ""))
     _ping_active = True
 
     async def _ping_loop() -> None:

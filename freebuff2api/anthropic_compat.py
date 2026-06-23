@@ -405,7 +405,6 @@ class AnthropicCompletionAccumulator:
         """Ingest one OpenAI SSE chunk."""
         self.id = chunk.get("id") or self.id
         self.created = chunk.get("created") or self.created
-        self.model = chunk.get("model") or self.model
         self.usage = chunk.get("usage") or self.usage
         self.system_fingerprint = (
             chunk.get("system_fingerprint") or self.system_fingerprint
@@ -473,6 +472,11 @@ class AnthropicCompletionAccumulator:
             else:
                 tu["input"] = inp
             content.append(tu)
+
+        # Guard: if upstream spent all tokens on reasoning/thinking, ensure
+        # content is never completely empty — Claude Code rejects empty content.
+        if not content:
+            content.append({"type": "text", "text": ""})
 
         # Usage.
         usage: dict[str, Any] = self.usage or {
@@ -551,7 +555,6 @@ class AnthropicStreamState:
         events: list[tuple[str, dict[str, Any]]] = []
 
         self.message_id = chunk.get("id") or self.message_id
-        self.model = chunk.get("model") or self.model
         self.usage = chunk.get("usage") or self.usage
         self.system_fingerprint = (
             chunk.get("system_fingerprint") or self.system_fingerprint
