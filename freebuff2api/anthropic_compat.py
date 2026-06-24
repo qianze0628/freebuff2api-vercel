@@ -173,8 +173,9 @@ def anthropic_to_openai_messages(body: dict[str, Any]) -> list[dict[str, Any]]:
             messages.append({"role": role, "content": str(content or "")})
             continue
 
-        # Separate blocks into text, tool_use, and tool_result groups.
+        # Separate blocks into text, thinking, tool_use, and tool_result groups.
         text_blocks: list[dict[str, Any]] = []
+        thinking_blocks: list[dict[str, Any]] = []
         tool_use_blocks: list[dict[str, Any]] = []
         tool_result_blocks: list[dict[str, Any]] = []
 
@@ -182,17 +183,28 @@ def anthropic_to_openai_messages(body: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(block, dict):
                 continue
             bt = block.get("type")
-            if bt == "tool_use":
+            if bt == "thinking":
+                thinking_blocks.append(block)
+            elif bt == "tool_use":
                 tool_use_blocks.append(block)
             elif bt == "tool_result":
                 tool_result_blocks.append(block)
             else:
                 text_blocks.append(block)
 
-        # Emit text content as one message (role preserved).
-        if text_blocks:
-            openai_content = _anthropic_content_to_openai(text_blocks)
-            messages.append({"role": role, "content": openai_content})
+        # Emit text content as one message (role preserved), with reasoning_content
+        # from any thinking blocks (DeepSeek requires reasoning_content round-trip).
+        if text_blocks or thinking_blocks:
+            openai_content = _anthropic_content_to_openai(text_blocks) if text_blocks else ""
+            msg: dict[str, Any] = {"role": role, "content": openai_content}
+            if thinking_blocks and role == "assistant":
+                reasoning_parts = [
+                    str(b.get("thinking", ""))
+                    for b in thinking_blocks
+                    if isinstance(b, dict)
+                ]
+                msg["reasoning_content"] = "".join(reasoning_parts)
+            messages.append(msg)
 
         # Emit each tool_use as an assistant message with tool_calls.
         for tb in tool_use_blocks:
@@ -405,7 +417,6 @@ class AnthropicCompletionAccumulator:
         """Ingest one OpenAI SSE chunk."""
         self.id = chunk.get("id") or self.id
         self.created = chunk.get("created") or self.created
-        self.model = chunk.get("model") or self.model
         self.usage = chunk.get("usage") or self.usage
         self.system_fingerprint = (
             chunk.get("system_fingerprint") or self.system_fingerprint
@@ -474,6 +485,11 @@ class AnthropicCompletionAccumulator:
                 tu["input"] = inp
             content.append(tu)
 
+        # Guard: if upstream spent all tokens on reasoning/thinking, ensure
+        # content is never completely empty — Claude Code rejects empty content.
+        if not content:
+            content.append({"type": "text", "text": ""})
+
         # Usage.
         usage: dict[str, Any] = self.usage or {
             "input_tokens": 0,
@@ -526,6 +542,7 @@ class AnthropicStreamState:
 
         # Current state per content block.
         self._text: str = ""
+        self._text_block_index: int = 0  # anthropic index of the text block
         self._current_tool_index: int | None = None  # openai tool index
         self._tool_use_ids: dict[int, str] = {}  # openai idx → tool_use id
         self._tool_names: dict[int, str] = {}  # openai idx → tool name
@@ -551,7 +568,6 @@ class AnthropicStreamState:
         events: list[tuple[str, dict[str, Any]]] = []
 
         self.message_id = chunk.get("id") or self.message_id
-        self.model = chunk.get("model") or self.model
         self.usage = chunk.get("usage") or self.usage
         self.system_fingerprint = (
             chunk.get("system_fingerprint") or self.system_fingerprint
@@ -599,12 +615,14 @@ class AnthropicStreamState:
                     # First text delta → start text block.
                     self._text_block_started = True
                     self._active_block_type = "text"
+                    self._text_block_index = self._next_anthro_index
+                    self._next_anthro_index += 1
                     events.append(
                         (
                             "content_block_start",
                             {
                                 "type": "content_block_start",
-                                "index": self._next_anthro_index,
+                                "index": self._text_block_index,
                                 "content_block": {"type": "text", "text": ""},
                             },
                         )
@@ -615,7 +633,7 @@ class AnthropicStreamState:
                         "content_block_delta",
                         {
                             "type": "content_block_delta",
-                            "index": self._next_anthro_index,
+                            "index": self._text_block_index,
                             "delta": {"type": "text_delta", "text": content},
                         },
                     )
@@ -644,13 +662,12 @@ class AnthropicStreamState:
                             and self._active_block_type == "text"
                         ):
                             self._text_block_closed = True
-                            text_anthro_idx = 0  # text is always index 0 in our impl
                             events.append(
                                 (
                                     "content_block_stop",
                                     {
                                         "type": "content_block_stop",
-                                        "index": text_anthro_idx,
+                                        "index": self._text_block_index,
                                     },
                                 )
                             )
@@ -728,13 +745,12 @@ class AnthropicStreamState:
         if self._text_block_started and not self._text_block_closed:
             self._text_block_closed = True
             if self._active_block_type == "text":
-                text_anthro_idx = 0  # text is always first block (index 0)
                 events.append(
                     (
                         "content_block_stop",
                         {
                             "type": "content_block_stop",
-                            "index": text_anthro_idx,
+                            "index": self._text_block_index,
                         },
                     )
                 )

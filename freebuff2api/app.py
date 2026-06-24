@@ -182,6 +182,10 @@ def _record_request(
     store.add(record)
 
 
+@app.get("/api/keep-warm")
+async def keep_warm() -> dict[str, Any]:
+    return {"status": "ok", "warm": True}
+
 @app.get("/healthz")
 async def healthz(request: Request) -> dict[str, Any]:
     _check_local_auth(request)
@@ -215,7 +219,13 @@ async def chat_completions(request: Request) -> Any:
         raise HTTPException(status_code=400, detail=str(error)) from error
     model = model_config.id
     if api_key and not api_key.allows_model(model):
-        raise HTTPException(status_code=403, detail=f"API key '{api_key.name}' not allowed to use model '{model}'")
+        return JSONResponse(
+            status_code=403,
+            content=anthropic_error_payload(
+                f"API key '{api_key.name}' not allowed to use model '{model}'",
+                error_type="permission_error",
+            ),
+        )
     logger.info(
         "chat completion request model=%s stream=%s messages=%s",
         model,
@@ -572,31 +582,50 @@ async def anthropic_messages(request: Request) -> Any:
     body = await request.json()
     settings = _settings(request)
 
-    # Validate required fields.
+    # Validate required fields — return Anthropic-compatible errors.
     if not isinstance(body.get("messages"), list):
-        raise HTTPException(
+        return JSONResponse(
             status_code=400,
-            detail="messages: field required (must be a non-empty list)",
+            content=anthropic_error_payload(
+                "messages: field required (must be a non-empty list)",
+                error_type="invalid_request_error",
+            ),
         )
     if not body.get("messages"):
-        raise HTTPException(
+        return JSONResponse(
             status_code=400,
-            detail="messages: must be a non-empty list",
+            content=anthropic_error_payload(
+                "messages: must be a non-empty list",
+                error_type="invalid_request_error",
+            ),
         )
     if body.get("max_tokens") is None:
-        raise HTTPException(
+        return JSONResponse(
             status_code=400,
-            detail="max_tokens: field required",
+            content=anthropic_error_payload(
+                "max_tokens: field required",
+                error_type="invalid_request_error",
+            ),
         )
 
-    # Model resolution.
+    # Model resolution — preserve original model name for the response.
+    requested_model = body.get("model")
     try:
-        model_config = resolve_model(body.get("model"))
+        model_config = resolve_model(requested_model)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        return JSONResponse(
+            status_code=400,
+            content=anthropic_error_payload(str(error), error_type="invalid_request_error"),
+        )
     model = model_config.id
     if api_key and not api_key.allows_model(model):
-        raise HTTPException(status_code=403, detail=f"API key '{api_key.name}' not allowed to use model '{model}'")
+        return JSONResponse(
+            status_code=403,
+            content=anthropic_error_payload(
+                f"API key '{api_key.name}' not allowed to use model '{model}'",
+                error_type="permission_error",
+            ),
+        )
     stream = body.get("stream") is True
     logger.info(
         "anthropic messages request model=%s stream=%s messages=%s max_tokens=%s",
@@ -666,7 +695,7 @@ async def anthropic_messages(request: Request) -> Any:
 
     if stream:
         return StreamingResponse(
-            _stream_anthropic_events(request, payload, run, api_key=api_key, account_lease=lease),
+            _stream_anthropic_events(request, payload, run, api_key=api_key, account_lease=lease, requested_model=requested_model),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache, no-transform",
@@ -681,7 +710,7 @@ async def anthropic_messages(request: Request) -> Any:
             request,
             payload,
             run,
-            model,
+            requested_model,
             client=lease.client,
         )
         duration_ms = int((time.time() - started) * 1000)
@@ -709,11 +738,12 @@ async def _stream_anthropic_events(
     api_key = None,
     account_lease: CodebuffAccountLease | None = None,
     client: CodebuffClient | None = None,
+    requested_model: str | None = None,
 ) -> AsyncIterator[bytes]:
     started = time.time()
     client = client or (account_lease.client if account_lease else _client(request))
     settings = _settings(request)
-    state = AnthropicStreamState(model=payload.get("model", ""))
+    state = AnthropicStreamState(model=requested_model or payload.get("model", ""))
     _ping_active = True
 
     async def _ping_loop() -> None:
