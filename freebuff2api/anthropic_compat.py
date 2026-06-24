@@ -194,19 +194,8 @@ def anthropic_to_openai_messages(body: dict[str, Any]) -> list[dict[str, Any]]:
 
         # Emit text content as one message (role preserved), with reasoning_content
         # from any thinking blocks (DeepSeek requires reasoning_content round-trip).
-        if text_blocks or thinking_blocks:
-            openai_content = _anthropic_content_to_openai(text_blocks) if text_blocks else ""
-            msg: dict[str, Any] = {"role": role, "content": openai_content}
-            if thinking_blocks and role == "assistant":
-                reasoning_parts = [
-                    str(b.get("thinking", ""))
-                    for b in thinking_blocks
-                    if isinstance(b, dict)
-                ]
-                msg["reasoning_content"] = "".join(reasoning_parts)
-            messages.append(msg)
-
-        # Emit each tool_use as an assistant message with tool_calls.
+        # Collect all tool_calls first so they can be bundled into the same message.
+        all_tool_calls: list[dict[str, Any]] = []
         for tb in tool_use_blocks:
             tu_id = tb.get("id") or f"toolu_{uuid_mod.uuid4().hex[:24]}"
             call_id = f"call_{uuid_mod.uuid4().hex[:24]}"
@@ -218,20 +207,36 @@ def anthropic_to_openai_messages(body: dict[str, Any]) -> list[dict[str, Any]]:
             else:
                 arguments = json.dumps(input_val, ensure_ascii=False)
 
+            all_tool_calls.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tb.get("name", ""),
+                        "arguments": arguments,
+                    },
+                }
+            )
+
+        if text_blocks or thinking_blocks:
+            openai_content = _anthropic_content_to_openai(text_blocks) if text_blocks else ""
+            msg: dict[str, Any] = {"role": role, "content": openai_content}
+            if thinking_blocks and role == "assistant":
+                reasoning_parts = [
+                    str(b.get("thinking", ""))
+                    for b in thinking_blocks
+                    if isinstance(b, dict)
+                ]
+                msg["reasoning_content"] = "".join(reasoning_parts)
+            if all_tool_calls:
+                msg["tool_calls"] = all_tool_calls
+            messages.append(msg)
+        elif all_tool_calls:
             messages.append(
                 {
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {
-                                "name": tb.get("name", ""),
-                                "arguments": arguments,
-                            },
-                        }
-                    ],
+                    "tool_calls": all_tool_calls,
                 }
             )
 

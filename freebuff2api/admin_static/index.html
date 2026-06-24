@@ -446,8 +446,8 @@
                 </div>
                 <div v-if="apiKeys.items && apiKeys.items.length" class="token-list">
                   <div v-for="item in apiKeys.items" :key="item.name" class="apikey-row">
-                    <span class="mono" style="font-weight:600;">{{ item.name }}</span>
-                    <span class="mono muted">{{ item.key_prefix }}...</span>
+                    <span class="mono" style="font-weight:600;">{{ item.key_prefix }}...</span>
+                    <span class="mono muted">{{ item.name }}</span>
                     <span class="apikey-models">
                       <n-tag v-for="m in item.allowed_models.slice(0,3)" :key="m" size="tiny" :bordered="false">{{ m }}</n-tag>
                       <span v-if="item.allowed_models.length > 3" class="muted">+{{ item.allowed_models.length - 3 }}</span>

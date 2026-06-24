@@ -125,15 +125,13 @@ class AnthropicMessageConversionTests(unittest.TestCase):
         }
         messages = anthropic_to_openai_messages(body)
 
-        # Should have: user text + assistant text + assistant tool_call
-        self.assertEqual(len(messages), 3)
+        # Should have: user text + assistant text with bundled tool_call
+        self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[1]["role"], "assistant")
         self.assertEqual(messages[1]["content"], "Let me check.")
-        self.assertEqual(messages[2]["role"], "assistant")
-        self.assertIsNone(messages[2]["content"])
-        self.assertIn("tool_calls", messages[2])
-        tc = messages[2]["tool_calls"][0]
+        self.assertIn("tool_calls", messages[1])
+        tc = messages[1]["tool_calls"][0]
         self.assertEqual(tc["type"], "function")
         self.assertEqual(tc["function"]["name"], "get_weather")
         parsed = json.loads(tc["function"]["arguments"])

@@ -73,3 +73,22 @@ PR #3 合并内容（来自 qianze0628/main，4 commits）：
 - tests/test_app_messages.py (修改) — test_messages_endpoint_accepts_anthropic_alias_model 重命名为 test_messages_endpoint_rejects_unknown_model，断言改为 assertEqual(400)
 
 回滚方式：git revert 本次 commit
+
+## 2026-06-24 - Task: 修复 Anthropic /v1/messages 长对话 tool_calls 500 错误 + admin API Key 页面显示修复
+
+### What was done
+修复 Claude Code 调用 /v1/messages 时长对话/多 tool_use 报 500 的问题：将同一 Anthropic assistant 消息中的多个 tool_use 合并为单个 OpenAI assistant 消息的 tool_calls 数组，避免上游因 insufficient tool messages following tool_calls message 拒绝请求。同时修复 admin API Key 列表页面名称和 key 显示顺序混淆的问题。
+
+### Testing
+- pytest tests/ 全部 120 个测试通过
+- Claude Code 风格 15 条消息含 4 轮 tool_use/tool_result 的非流式请求：200 OK
+- Claude Code 风格 5 条消息含工具的流式请求：200 OK，308 个 SSE 事件
+- 端到端验证：name 用作标签（备注），key 用作认证凭证——name 传 x-api-key 返回 401，key 传 x-api-key 返回 200
+
+### Notes
+改动文件清单：
+- freebuff2api/anthropic_compat.py (修改) — 合并同一消息的 tool_use 块为单条 assistant 消息的 tool_calls 数组
+- tests/test_anthropic_compat.py (修改) — test_tool_use_block_maps_to_assistant_with_tool_calls 适配新的合并行为（3→2 条消息）
+- freebuff2api/admin_static/index.html (修改) — API Key 列表显示顺序：key_prefix 加粗在前（主标识），name 灰色在后（备注标签）
+
+回滚方式：git revert 本次 commit
